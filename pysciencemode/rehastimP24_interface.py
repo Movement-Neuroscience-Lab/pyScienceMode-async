@@ -46,6 +46,8 @@ class RehastimP24(RehastimGeneric):
         self._current_stim_duration = None
         self.device_type = Device.Rehastimp24.value
         self._safety = True
+        self._running_flag = False
+        self.current_running_task = None
 
         super().__init__(port, device_type=self.device_type, show_log=self.show_log)
 
@@ -637,12 +639,45 @@ class RehastimP24(RehastimGeneric):
         """
         if stimulation_duration is not None:
             self._current_stim_duration = stimulation_duration
-
-        await self.start_stimulation_async(
+        if self.current_running_task and not self.current_running_task.done():
+            result = self.current_running_task.cancel()
+            print(f'previous call got cancelled: {result}')
+            try:
+                await self.current_update_task
+            except asyncio.CancelledError:
+                print("Previous update task cancelled.")
+        self._running_flag = True
+        self.current_running_task = asyncio.create_task(
+            self.start_stimulation_async_helper(
             upd_list_channels, self._current_stim_duration, self._safety
-        )
+        ))
+        self._running_flag = False
+
+    async def start_stimulator_async(self,
+        upd_list_channels: list,
+        stimulation_duration: int | float = None,
+        safety: bool = True
+        ):
+        if stimulation_duration is not None:
+            self._current_stim_duration = stimulation_duration
+        if self.current_running_task and not self.current_running_task.done():
+            result = self.current_running_task.cancel()
+            print(f'previous call got cancelled: {result}')
+            '''
+            try:
+                await self.current_update_task
+            except asyncio.CancelledError:
+                print("Previous update task cancelled.")
+            '''
+        self._running_flag = True
+        self.current_running_task = asyncio.create_task(
+            self.start_stimulation_async_helper(
+            upd_list_channels, self._current_stim_duration, self._safety
+        ))
+        self._running_flag = False
         
-    async def start_stimulation_async(
+        
+    async def start_stimulation_async_helper(
         self,
         upd_list_channels: list,
         stimulation_duration: int | float = None,
@@ -698,6 +733,7 @@ class RehastimP24(RehastimGeneric):
                     )
                 )
         self._send_stimulation_update()
+        self._running_flag = True
 
         if stimulation_duration:
             start_time = time.time()
@@ -709,6 +745,10 @@ class RehastimP24(RehastimGeneric):
 
         self.pause_stimulation()
         self.stimulation_started = True
+        self._running_flag = False
+        
+    def get_run_status(self):
+        return self._running_flag
 
     def end_stimulation(self):
         """
