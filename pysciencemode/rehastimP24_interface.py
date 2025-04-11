@@ -12,6 +12,7 @@ except ImportError:
     pass
 from .enums import Device, HighVoltage, StimStatus
 from .channel import Point, Channel
+import asyncio
 
 
 class RehastimP24(RehastimGeneric):
@@ -620,6 +621,94 @@ class RehastimP24(RehastimGeneric):
         self.start_stimulation(
             upd_list_channels, self._current_stim_duration, self._safety
         )
+        
+    async def update_stimulation_async(
+        self, upd_list_channels: list, stimulation_duration: int | float = None
+    ):
+        """
+        Update the ml stimulation on the device with new channel configurations.
+
+        Parameters
+        ----------
+        upd_list_channels : list
+            Channels to stimulate.
+        stimulation_duration : int | float
+            Duration of the updated stimulation in seconds.
+        """
+        if stimulation_duration is not None:
+            self._current_stim_duration = stimulation_duration
+
+        await self.start_stimulation_async(
+            upd_list_channels, self._current_stim_duration, self._safety
+        )
+        
+    async def start_stimulation_async(
+        self,
+        upd_list_channels: list,
+        stimulation_duration: int | float = None,
+        safety: bool = True,
+    ):
+        """
+        Start the mid level stimulation on the device.
+
+        Parameters
+        ----------
+        stimulation_duration : int | float
+            Duration of the stimulation in seconds.
+        upd_list_channels : list
+            Channels to stimulate.
+        safety : bool
+            Set to True if you want to check the pulse symmetry. False otherwise.
+        """
+
+        if stimulation_duration and not isinstance(stimulation_duration, int | float):
+            raise TypeError(
+                "Please provide a int or float type for stimulation duration"
+            )
+
+        if upd_list_channels is not None:
+            new_electrode_number = calc_electrode_number(upd_list_channels)
+            if new_electrode_number != self.electrode_number:
+                raise RuntimeError(
+                    "Error update: all channels have not been initialised"
+                )
+
+        check_list_channel_order(upd_list_channels)
+
+        self.list_channels = upd_list_channels
+        self._safety = safety
+        if stimulation_duration:
+            self._current_stim_duration = stimulation_duration
+        self.ml_update.packet_number = self.get_next_packet_number()
+
+        for channel in upd_list_channels:
+            if safety and not channel.is_pulse_symmetric():
+                raise ValueError(
+                    f"Pulse for channel {channel._no_channel} is not symmetric.\n"
+                    f"Polarization and depolarization must have the same area.\n"
+                    f"Or set safety=False in start_stimulation."
+                )
+            #  Check if points are provided for each channel stimulated
+            if not channel.list_point:
+                raise ValueError(
+                    "No stimulation point provided for channel {}. "
+                    "Please either provide an amplitude and pulse width for a biphasic stimulation."
+                    "Or specify specific stimulation points.".format(
+                        channel._no_channel
+                    )
+                )
+        self._send_stimulation_update()
+
+        if stimulation_duration:
+            start_time = time.time()
+            while (time.time() - start_time) < stimulation_duration:
+                self._get_current_data()
+                self._get_last_ack()
+                self.check_stimulation_errors()
+                await asyncio.sleep(0.005)
+
+        self.pause_stimulation()
+        self.stimulation_started = True
 
     def end_stimulation(self):
         """
