@@ -42,7 +42,7 @@ async def main():
     # --- Start an initial stimulation task with a long duration (10 seconds) ---
     print(f"[{time.strftime('%X')}] [Mid-level] Starting initial async stimulation for 10 seconds...")
     initial_stimulation_task = asyncio.create_task(
-        stimulator.start_stimulation_async(
+        stimulator.start_stimulator_async(
             upd_list_channels=list_channels,
             stimulation_duration=10,
             safety=True,

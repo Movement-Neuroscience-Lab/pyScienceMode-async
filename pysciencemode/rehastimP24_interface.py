@@ -643,7 +643,7 @@ class RehastimP24(RehastimGeneric):
             result = self.current_running_task.cancel()
             print(f'previous call got cancelled: {result}')
             try:
-                await self.current_update_task
+                await self.current_running_task
             except asyncio.CancelledError:
                 print("Previous update task cancelled.")
         self._running_flag = True
