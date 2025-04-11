@@ -12,6 +12,7 @@ async def ticker(duration, label="Ticker"):
 
 async def main():
     # --- Setup channels for mid-level stimulation ---
+    # (We only use one channel here to focus on cancellation/update behavior.)
     channel_1 = Channel(
         no_channel=1,
         name="Biceps",
@@ -30,96 +31,57 @@ async def main():
         ramp=16,
         device_type=Device.Rehastimp24,
     )
-    channel_3 = Channel(
-        mode=Modes.DOUBLET,
-        no_channel=3,
-        amplitude=20,
-        pulse_width=35,
-        name="Triceps",
-        frequency=25,
-        ramp=5,
-        device_type=Device.Rehastimp24,
-    )
-    channel_4 = Channel(
-        mode=Modes.TRIPLET,
-        no_channel=4,
-        amplitude=40,
-        pulse_width=500,
-        name="Quadriceps",
-        frequency=15,
-        ramp=1,
-        device_type=Device.Rehastimp24,
-    )
+    # For the purpose of this example we use a list containing channel_2 only.
     list_channels = [channel_2]
 
     # --- Initialize stimulator ---
     stimulator = St(port="COM4", show_log="Status")
-
-    print("[Mid-level] Initializing stimulation...")
+    print(f"[{time.strftime('%X')}] [Mid-level] Initializing stimulation...")
     stimulator.init_stimulation(list_channels=list_channels)
 
-    print("[Mid-level] Starting async stimulation for 5 seconds...")
-    # Create tasks so both stimulation and ticker run concurrently.
-    stimulation_task = asyncio.create_task(
+    # --- Start an initial stimulation task with a long duration (10 seconds) ---
+    print(f"[{time.strftime('%X')}] [Mid-level] Starting initial async stimulation for 10 seconds...")
+    initial_stimulation_task = asyncio.create_task(
         stimulator.start_stimulation_async(
             upd_list_channels=list_channels,
-            stimulation_duration=5,
+            stimulation_duration=10,
             safety=True,
         )
     )
-    ticker_task = asyncio.create_task(ticker(5, label="Stimulation"))
 
-    # Wait for both tasks to finish.
-    await asyncio.gather(stimulation_task, ticker_task)
-    print("[Mid-level] Async stimulation complete.")
+    # Start a ticker that runs for 12 seconds.
+    ticker_task = asyncio.create_task(ticker(12, label="Stimulation Ticker"))
 
-    # Update channel parameters mid-stimulation
-    print("[Mid-level] Updating channel 2 parameters...")
+    # Let the initial stimulation run for 3 seconds before issuing an update.
+    await asyncio.sleep(3)
+    print(f"[{time.strftime('%X')}] [Mid-level] Requesting stimulation update before initial stimulation elapses...")
+
+    # --- Change channel parameters mid-run ---
     channel_2.set_amplitude(15)
     channel_2.set_pulse_width(200)
     channel_2.set_frequency(10)
     channel_2.set_mode(Modes.TRIPLET)
 
-    print("[Mid-level] Restarting async stimulation for another 5 seconds...")
-    stimulation_update_task = asyncio.create_task(
+    # Call the update_stimulation_async function.
+    # This should cancel the previous stimulation task (if still running) and start a new one.
+    update_stimulation_task = asyncio.create_task(
         stimulator.update_stimulation_async(
             upd_list_channels=list_channels,
-            stimulation_duration=5,
+            stimulation_duration=8,  # New duration (could be different from the original)
         )
     )
-    ticker_update_task = asyncio.create_task(ticker(5, label="Update Stimulation"))
+    print(f"[{time.strftime('%X')}] [Mid-level] Update stimulation task initiated.")
 
-    await asyncio.gather(stimulation_update_task, ticker_update_task)
-    print("[Mid-level] Async update stimulation complete.")
+    # Wait for both the (cancellation/updated) stimulation and the ticker to finish.
+    # Because update_stimulation_async cancels the previous task if it's still running,
+    # you should see evidence of cancellation in the log prints.
+    await asyncio.gather(initial_stimulation_task, update_stimulation_task, ticker_task)
+    print(f"[{time.strftime('%X')}] [Mid-level] Async stimulation update complete.")
 
-    print("[Mid-level] Ending stimulation...")
+    print(f"[{time.strftime('%X')}] [Mid-level] Ending stimulation...")
     stimulator.end_stimulation()
 
-    # --- Low-level stimulation example (kept commented) ---
-    '''
-    print("[Low-level] Starting low-level stimulation...")
-    stimulator.start_stim_one_channel_stimulation(
-        no_channel=1,
-        points=points,
-        stim_sequence=30,
-        pulse_interval=10,
-    )
-    print("[Low-level] Low-level stimulation complete.")
-
-    # Update low-level points
-    print("[Low-level] Updating stimulation points...")
-    points[0].set_amplitude(30); points[0].set_pulse_width(350)
-    points[1].set_amplitude(-30); points[1].set_pulse_width(350)
-    points[2].set_amplitude(20); points[2].set_pulse_width(350)
-    points[3].set_amplitude(-20); points[3].set_pulse_width(350)
-
-    stimulator.update_stim_one_channel(upd_list_point=points)
-    print("[Low-level] Low-level update complete.")
-
-    print("[Low-level] Stopping low-level stimulation...")
-    stimulator.end_stim_one_channel()
-    '''
-    print("Closing connection to RehastimP24...")
+    print(f"[{time.strftime('%X')}] Closing connection to RehastimP24...")
     stimulator.close_port()
 
 if __name__ == "__main__":
