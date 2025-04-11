@@ -750,17 +750,14 @@ class RehastimP24(RehastimGeneric):
     def get_run_status(self):
         return self._running_flag
 
-    async def end_stimulation(self):
+    def end_stimulation(self):
         """
         Stop the mid level stimulation.
         """
+
         if self.current_running_task and not self.current_running_task.done():
             result = self.current_running_task.cancel()
             print(f'previous call got cancelled: {result}')
-            try:
-                await self.current_running_task
-            except asyncio.CancelledError:
-                print("Previous update task cancelled.")
         packet_number = self.get_next_packet_number()
 
         if not sciencemode.lib.smpt_send_ml_stop(self.device, packet_number):
