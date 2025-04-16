@@ -646,12 +646,10 @@ class RehastimP24(RehastimGeneric):
                 await self.current_running_task
             except asyncio.CancelledError:
                 print("Previous update task cancelled.")
-        self._running_flag = True
         self.current_running_task = asyncio.create_task(
             self.start_stimulation_async_helper(
             upd_list_channels, self._current_stim_duration, self._safety
         ))
-        self._running_flag = False
 
     async def start_stimulator_async(self,
         upd_list_channels: list,
@@ -669,12 +667,10 @@ class RehastimP24(RehastimGeneric):
             except asyncio.CancelledError:
                 print("Previous update task cancelled.")
             '''
-        self._running_flag = True
         self.current_running_task = asyncio.create_task(
             self.start_stimulation_async_helper(
             upd_list_channels, self._current_stim_duration, self._safety
         ))
-        self._running_flag = False
         
         
     async def start_stimulation_async_helper(
@@ -723,7 +719,7 @@ class RehastimP24(RehastimGeneric):
                     f"Polarization and depolarization must have the same area.\n"
                     f"Or set safety=False in start_stimulation."
                 )
-            #  Check if points are provided for each channel stimulated
+            # Check if points are provided for each channel stimulated
             if not channel.list_point:
                 raise ValueError(
                     "No stimulation point provided for channel {}. "
@@ -732,20 +728,26 @@ class RehastimP24(RehastimGeneric):
                         channel._no_channel
                     )
                 )
+
         self._send_stimulation_update()
-        self._running_flag = True
+        self._running_flag = True  # Mark that stimulation is starting.
 
-        if stimulation_duration:
-            start_time = time.time()
-            while (time.time() - start_time) < stimulation_duration:
-                self._get_current_data()
-                self._get_last_ack()
-                self.check_stimulation_errors()
-                await asyncio.sleep(0.005)
+        try:
+            if stimulation_duration:
+                start_time = time.time()
+                while (time.time() - start_time) < stimulation_duration:
+                    self._get_current_data()
+                    self._get_last_ack()
+                    self.check_stimulation_errors()
+                    await asyncio.sleep(0.005)
 
-        self.pause_stimulation()
-        self.stimulation_started = True
-        self._running_flag = False
+            self.stimulation_started = True
+        finally:
+            # Regardless of whether the operation completes normally or is cancelled,
+            # we ensure that stimulation is paused and the running flag is cleared.
+            self.pause_stimulation()
+            self._running_flag = False
+
         
     def get_run_status(self):
         return self._running_flag
@@ -753,13 +755,20 @@ class RehastimP24(RehastimGeneric):
     def end_stimulation(self):
         """
         Stop the mid level stimulation.
+        This method cancels the current asynchronous stimulation task (if running),
+        calls pause_stimulation() to ensure the device is safely paused,
+        sends the stop command to the device, and resets the stimulation state.
         """
-
+        # Cancel the asynchronous stimulation task if it is currently running.
         if self.current_running_task and not self.current_running_task.done():
             result = self.current_running_task.cancel()
-            print(f'previous call got cancelled: {result}')
-        packet_number = self.get_next_packet_number()
+            print(f"Previous stimulation task cancellation triggered: {result}")
 
+        # Attempt to pause stimulation to bring the device to a safe state.
+        self.pause_stimulation()
+
+        # Send the stop command to the device.
+        packet_number = self.get_next_packet_number()
         if not sciencemode.lib.smpt_send_ml_stop(self.device, packet_number):
             raise RuntimeError("Failure to stop stimulation.")
         self.log(
@@ -769,7 +778,11 @@ class RehastimP24(RehastimGeneric):
             ),
         )
         self._get_last_ack()
+
+        # Mark the stimulation as stopped and ensure the running flag is cleared.
         self.stimulation_started = False
+        self._running_flag = False
+
 
     def check_stimulation_errors(self):
         """
